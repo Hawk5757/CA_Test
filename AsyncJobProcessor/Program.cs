@@ -115,9 +115,12 @@ try
         using (var scope = app.Services.CreateScope())
         {
             var testClientService = scope.ServiceProvider.GetRequiredService<TestClientService>();
-            // Запустіть один або кілька тестів
-            _ = testClientService.RunTestJobAsync("Test Data 1");
-            _ = testClientService.RunTestJobAsync("Another Test Data");
+            var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            var callbackHost = configuration["CallbackHost"] ?? "https://localhost:7213";
+
+            // Це URL вашого AsyncJobProcessor, куди MockService надішле колбек
+            _ = testClientService.RunTestJobAsync("Test Data 1 (via client service)", $"{callbackHost}/api/callbacks/jobs/{Guid.NewGuid()}");
+            _ = testClientService.RunTestJobAsync("Test Data 2 (via client service)", $"{callbackHost}/api/callbacks/jobs/{Guid.NewGuid()}");
         }
     }
 
