@@ -106,7 +106,45 @@ The application is instrumented with **Prometheus-net** to expose custom and run
 * Redis server (running locally or accessible via network)
 * A third-party service that can receive job requests and send callbacks. For testing, you might need a mock service.
 
-### 3.2. Configuration
+## 3.2. Running MockThirdPartyService for Testing
+
+For `AsyncJobProcessor` to function correctly in a testing environment (especially when using `TestClientService` to automatically initiate jobs), `MockThirdPartyService` needs to be running as a separate process. It simulates the behavior of the external third-party service that `AsyncJobProcessor` interacts with.
+
+### Steps to Run MockThirdPartyService:
+
+1.  **Open a new terminal or command prompt window.**
+  * **Important:** `MockThirdPartyService` must run in its own, separate terminal window.
+
+2.  **Navigate to the `MockThirdPartyService` project directory.**
+  * For example, if your root repository is `C:\MySolution`, and `MockThirdPartyService` is a subfolder, execute:
+      ```bash
+      cd C:\MySolution\MockThirdPartyService
+      ```
+
+3.  **Start the service:**
+  * In the terminal, while inside the `MockThirdPartyService` directory, execute the command:
+      ```bash
+      dotnet run
+      ```
+
+4.  **Verify the service launched successfully:**
+  * In the `MockThirdPartyService` console, you should see messages indicating a successful launch and the port the service is listening on. Look for a line similar to:
+      ```
+      info: Microsoft.Hosting.Lifetime[14]
+            Now listening on: http://localhost:5000
+      ```
+  * **Note:** By default, `MockThirdPartyService` is configured to listen on `http://localhost:5000`. Ensure this address matches the `ThirdPartyService:BaseUrl` value in your `AsyncJobProcessor`'s `appsettings.json` file. If `MockThirdPartyService` starts on a different port, update the configuration in `AsyncJobProcessor` accordingly.
+
+5.  **Keep this terminal window open.**
+  * `MockThirdPartyService` must remain running in the background while you are testing `AsyncJobProcessor`.
+
+---
+
+**Example Usage:**
+
+After launching `MockThirdPartyService` and Redis, you can start `AsyncJobProcessor`. The `TestClientService` within `AsyncJobProcessor` will automatically send requests to `MockThirdPartyService`, which will, in turn, send callbacks back to `AsyncJobProcessor`. Observe the logs in the consoles of both services to confirm successful interaction.
+
+### 3.3. Configuration
 
 Update `appsettings.json` (or `appsettings.Development.json`) with your specific configurations:
 
