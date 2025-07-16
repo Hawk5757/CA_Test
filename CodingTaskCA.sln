@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AsyncJobProcessor", "AsyncJobProcessor\AsyncJobProcessor.csproj", "{9F98198B-A5E6-4F7B-A495-09B70E3C4569}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MockThirdPartyService", "MockThirdPartyService\MockThirdPartyService.csproj", "{DEE6F065-DBE2-4801-B077-E67C034F0F52}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{9F98198B-A5E6-4F7B-A495-09B70E3C4569}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9F98198B-A5E6-4F7B-A495-09B70E3C4569}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9F98198B-A5E6-4F7B-A495-09B70E3C4569}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9F98198B-A5E6-4F7B-A495-09B70E3C4569}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DEE6F065-DBE2-4801-B077-E67C034F0F52}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DEE6F065-DBE2-4801-B077-E67C034F0F52}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DEE6F065-DBE2-4801-B077-E67C034F0F52}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DEE6F065-DBE2-4801-B077-E67C034F0F52}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

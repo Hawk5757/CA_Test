@@ -1,0 +1,56 @@
+# Visual Studio / Rider
+.vs/
+.idea/
+*.suo
+*.user
+*.atsln.user
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Tt]emp/
+*.[Pp]ublish/
+*.builds
+*.deploy/
+
+# Packages
+packages/
+*.nupkg
+.nuget/
+project.lock.json
+
+# Rider
+*.csproj.DotSettings
+*.sln.DotSettings
+*.sln.DotSettings.user
+*.sln.DotSettings.user.bak
+
+# Misc
+*.opendb
+*.log
+*.pdb
+*.scc
+*.vssscc
+*.bak
+*.vspscc
+install-log.txt
+*.ncb
+*.opensdf
+*.tlog
+*.cache
+*.obj
+*.res
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+logs/
+
+# Local settings
+# appsettings.Development.json
+# appsettings.json
