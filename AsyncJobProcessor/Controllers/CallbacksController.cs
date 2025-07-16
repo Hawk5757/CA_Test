@@ -1,9 +1,6 @@
-using AsyncJobProcessor.Interfaces; // Додаємо using для інтерфейсу
+using AsyncJobProcessor.Interfaces;
 using AsyncJobProcessor.Models;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Threading.Tasks;
 
 namespace AsyncJobProcessor.Controllers
 {
@@ -53,20 +50,12 @@ namespace AsyncJobProcessor.Controllers
                 _logger.LogWarning("Received callback for jobId {JobId} with null result.", jobId);
                 return BadRequest("JobResult cannot be null.");
             }
-            
-            if (!ModelState.IsValid)
-            {
-                _logger.LogWarning("Invalid JobResult model received for jobId {JobId}. Errors: {Errors}", jobId, ModelState);
-                return BadRequest(ModelState); // Поверне деталі помилок валідації
-            }
 
             _logger.LogInformation("Received callback for jobId: {JobId} with status: {Status}", jobId, result.Status);
 
             try
             {
                 // [2] Делегуємо обробку JobService.
-                // JobService оновить Redis та опублікує результат у Pub/Sub,
-                // що розблокує очікування в `RegisterAndWaitForJob`.
                 bool jobFoundAndProcessed = await _jobService.ProcessJobCallbackAsync(jobId, result);
 
                 if (!jobFoundAndProcessed)
@@ -79,8 +68,7 @@ namespace AsyncJobProcessor.Controllers
             }
             catch (InvalidOperationException ex) 
             {
-                // [4] Якщо JobService викидає InvalidOperationException (наприклад, jobId не знайдено,
-                // хоча в нашому поточному сценарії це малоймовірно, оскільки ми створюємо jobId на початку).
+                // [4] Якщо JobService викидає InvalidOperationException (наприклад, jobId не знайдено).
                 _logger.LogError(ex, "JobId {JobId} not found or invalid state during callback processing.", jobId);
                 return NotFound(ex.Message); // 404 Not Found
             }

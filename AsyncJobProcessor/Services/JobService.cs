@@ -13,29 +13,29 @@ namespace AsyncJobProcessor.Services
         // Нові статичні метрики Prometheus
         // Лічильник для всіх зареєстрованих завдань
         private static readonly Counter JobsRegisteredTotal = Metrics.CreateCounter(
-            "async_job_processor_jobs_registered_total", 
+            "async_job_processor_jobs_registered_total",
             "Total number of jobs registered.");
 
         // Лічильник для завдань, що завершилися успішно
         private static readonly Counter JobsCompletedTotal = Metrics.CreateCounter(
-            "async_job_processor_jobs_completed_total", 
+            "async_job_processor_jobs_completed_total",
             "Total number of jobs completed successfully.");
 
         // Лічильник для завдань, що завершилися з помилкою (будь-який неуспішний статус)
         private static readonly Counter JobsFailedTotal = Metrics.CreateCounter(
-            "async_job_processor_jobs_failed_total", 
-            "Total number of jobs failed.", 
+            "async_job_processor_jobs_failed_total",
+            "Total number of jobs failed.",
             new CounterConfiguration { LabelNames = new[] { "reason" } }); // Додаємо лейбл для причини
 
         // Gauge для кількості одночасних очікувань (активних завдань)
         private static readonly Gauge JobsConcurrentWaiting = Metrics.CreateGauge(
-            "async_job_processor_jobs_concurrent_waiting", 
+            "async_job_processor_jobs_concurrent_waiting",
             "Number of jobs currently waiting for a result.");
 
         // Histogram для часу обробки завдань (від реєстрації до завершення)
         private static readonly Histogram JobProcessingDurationSeconds = Metrics.CreateHistogram(
-            "async_job_processor_job_processing_duration_seconds", 
-            "Duration of job processing from registration to completion.", 
+            "async_job_processor_job_processing_duration_seconds",
+            "Duration of job processing from registration to completion.",
             new HistogramConfiguration
             {
                 Buckets = Histogram.LinearBuckets(start: 0, width: 5, count: 12) // Від 0 до 60 секунд з кроком 5с
@@ -49,18 +49,18 @@ namespace AsyncJobProcessor.Services
         private readonly ConcurrentDictionary<string, TaskCompletionSource<JobResult>> _jobCompletionSources;
         private readonly byte[] _callbackSecretKeyBytes;
 
-        public JobService(IDatabase redisDb, IConnectionMultiplexer redisMux, 
-                          ILogger<JobService> logger, IConfiguration configuration,
-                          IHttpClientFactory httpClientFactory)
+        public JobService(IDatabase redisDb, IConnectionMultiplexer redisMux,
+            ILogger<JobService> logger, IConfiguration configuration,
+            IHttpClientFactory httpClientFactory)
         {
             _redisDb = redisDb;
             _redisMux = redisMux;
             _logger = logger;
             _configuration = configuration;
-            _thirdPartyHttpClient = httpClientFactory.CreateClient("ThirdPartyService"); 
+            _thirdPartyHttpClient = httpClientFactory.CreateClient("ThirdPartyService");
             _jobCompletionSources = new ConcurrentDictionary<string, TaskCompletionSource<JobResult>>();
 
-            var secretKey = _configuration["Security:CallbackSecretKey"] 
+            var secretKey = _configuration["Security:CallbackSecretKey"]
                             ?? throw new InvalidOperationException("CallbackSecretKey is not configured.");
             _callbackSecretKeyBytes = System.Text.Encoding.UTF8.GetBytes(secretKey);
         }
@@ -84,10 +84,10 @@ namespace AsyncJobProcessor.Services
                 new HashEntry("createdAt", createdAtUnixSeconds) // Зберігаємо час для розрахунку тривалості
             });
             _logger.LogInformation("Job {JobId} registered in Redis with state 'pending'.", jobId);
-            
+
             //Встановлення TTL для ключа завдання в Redis
             // Ключ буде автоматично видалено через 24 години, якщо не буде оновлено.
-            await _redisDb.KeyExpireAsync(jobKey, TimeSpan.FromHours(24)); 
+            await _redisDb.KeyExpireAsync(jobKey, TimeSpan.FromMinutes(30));
             _logger.LogInformation("Set TTL for job {JobId} to 24 hours.", jobId);
 
             // 1.3. Підписуємо поточний екземпляр сервісу на Redis-канал.
@@ -95,11 +95,13 @@ namespace AsyncJobProcessor.Services
             var channelName = $"jobs:results:{jobId}";
             var tcs = new TaskCompletionSource<JobResult>();
             _jobCompletionSources.TryAdd(jobId, tcs);
-            _logger.LogInformation("Service subscribed to Redis channel {ChannelName} for jobId {JobId}.", channelName, jobId);
+            _logger.LogInformation("Service subscribed to Redis channel {ChannelName} for jobId {JobId}.", channelName,
+                jobId);
 
             await pubSub.SubscribeAsync(RedisChannel.Literal(channelName), async (channel, message) =>
             {
-                _logger.LogInformation("Received message on channel {ChannelName} for jobId {JobId}.", channelName, jobId);
+                _logger.LogInformation("Received message on channel {ChannelName} for jobId {JobId}.", channelName,
+                    jobId);
                 try
                 {
                     var result = JsonSerializer.Deserialize<JobResult>(message.ToString());
@@ -108,34 +110,44 @@ namespace AsyncJobProcessor.Services
                         if (_jobCompletionSources.TryRemove(jobId, out var currentTcs))
                         {
                             currentTcs.SetResult(result);
-                            _logger.LogInformation("TaskCompletionSource for jobId {JobId} completed with result.", jobId);
+                            _logger.LogInformation("TaskCompletionSource for jobId {JobId} completed with result.",
+                                jobId);
                         }
                         else
                         {
-                            _logger.LogWarning("TaskCompletionSource for jobId {JobId} not found or already completed when message received.", jobId);
+                            _logger.LogWarning(
+                                "TaskCompletionSource for jobId {JobId} not found or already completed when message received.",
+                                jobId);
                         }
                     }
                     else
                     {
-                        _logger.LogError("Failed to deserialize JobResult from Redis message for jobId {JobId}. Message: {Message}", jobId, message.ToString());
+                        _logger.LogError(
+                            "Failed to deserialize JobResult from Redis message for jobId {JobId}. Message: {Message}",
+                            jobId, message.ToString());
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error deserializing or processing Redis message for jobId {JobId}. Message: {Message}", jobId, message.ToString());
+                    _logger.LogError(ex,
+                        "Error deserializing or processing Redis message for jobId {JobId}. Message: {Message}", jobId,
+                        message.ToString());
                 }
                 finally
                 {
                     await pubSub.UnsubscribeAsync(RedisChannel.Literal(channelName));
-                    _logger.LogInformation("Unsubscribed from Redis channel {ChannelName} for jobId {JobId} in Pub/Sub callback.", channelName, jobId);
+                    _logger.LogInformation(
+                        "Unsubscribed from Redis channel {ChannelName} for jobId {JobId} in Pub/Sub callback.",
+                        channelName, jobId);
                 }
             });
 
             // 2. Запуск обробки на сторонньому сервісі (з використанням HttpClient з Polly)
-            var host = _configuration["CallbackHost"] ?? "https://localhost:7213"; 
+            var host = _configuration["CallbackHost"] ?? "https://localhost:7213";
             var callbackUrl = $"{host}/api/callbacks/jobs/{jobId}";
-            
-            var simulatedJobResultForHmac = new JobResult { 
+
+            var simulatedJobResultForHmac = new JobResult
+            {
                 JobId = jobId,
                 Status = JobStatus.Completed, //  Використання Enum для статусу
                 Message = $"Job {jobId} processed successfully by external service (simulated).",
@@ -150,24 +162,29 @@ namespace AsyncJobProcessor.Services
                 CallbackUrl = callbackUrl,
                 Data = request.Data,
                 SimulatedCallbackPayload = simulatedJobResultForHmac,
-                SimulatedHmacSignature = hmacSignature 
+                SimulatedHmacSignature = hmacSignature
             };
-            
+
             var jsonRequest = JsonSerializer.Serialize(externalServiceRequest);
             var content = new StringContent(jsonRequest, System.Text.Encoding.UTF8, "application/json");
 
-            _logger.LogInformation("Calling external service for jobId {JobId} with callback {CallbackUrl}. Request data: {RequestData}", 
+            _logger.LogInformation(
+                "Calling external service for jobId {JobId} with callback {CallbackUrl}. Request data: {RequestData}",
                 jobId, callbackUrl, jsonRequest);
 
             try
             {
-                var response = await _thirdPartyHttpClient.PostAsync("/startjob", content, cancellationToken); 
-                response.EnsureSuccessStatusCode(); 
-                _logger.LogInformation("Successfully initiated job {JobId} on external service. HTTP Status: {StatusCode}", jobId, response.StatusCode);
+                var response = await _thirdPartyHttpClient.PostAsync("/startjob", content, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                _logger.LogInformation(
+                    "Successfully initiated job {JobId} on external service. HTTP Status: {StatusCode}", jobId,
+                    response.StatusCode);
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "Failed to initiate job {JobId} on external service after retries. Error: {ErrorMessage}", jobId, ex.Message);
+                _logger.LogError(ex,
+                    "Failed to initiate job {JobId} on external service after retries. Error: {ErrorMessage}", jobId,
+                    ex.Message);
                 await _redisDb.HashSetAsync(jobKey, new HashEntry[]
                 {
                     new HashEntry("state", JobStatus.Failed.ToString()),
@@ -177,8 +194,10 @@ namespace AsyncJobProcessor.Services
                 JobsConcurrentWaiting.Dec(); // Зменшуємо Gauge
                 if (_jobCompletionSources.TryRemove(jobId, out var currentTcs))
                 {
-                    currentTcs.SetException(new ApplicationException($"Failed to start external service for job {jobId}", ex));
+                    currentTcs.SetException(
+                        new ApplicationException($"Failed to start external service for job {jobId}", ex));
                 }
+
                 throw;
             }
             catch (OperationCanceledException)
@@ -190,7 +209,8 @@ namespace AsyncJobProcessor.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "An unexpected error occurred while calling external service for jobId {JobId}.", jobId);
+                _logger.LogError(ex, "An unexpected error occurred while calling external service for jobId {JobId}.",
+                    jobId);
                 await _redisDb.HashSetAsync(jobKey, new HashEntry[]
                 {
                     new HashEntry("state", JobStatus.Failed.ToString()),
@@ -198,10 +218,12 @@ namespace AsyncJobProcessor.Services
                 });
                 JobsFailedTotal.WithLabels("unexpected_error").Inc(); //  Збільшуємо лічильник помилок
                 JobsConcurrentWaiting.Dec(); //  Зменшуємо Gauge
-                 if (_jobCompletionSources.TryRemove(jobId, out var currentTcs))
+                if (_jobCompletionSources.TryRemove(jobId, out var currentTcs))
                 {
-                    currentTcs.SetException(new ApplicationException($"Unexpected error calling external service for job {jobId}", ex));
+                    currentTcs.SetException(
+                        new ApplicationException($"Unexpected error calling external service for job {jobId}", ex));
                 }
+
                 throw;
             }
 
@@ -229,18 +251,23 @@ namespace AsyncJobProcessor.Services
                 // Прибираємо підписку та TCS у випадку скасування
                 if (_jobCompletionSources.TryRemove(jobId, out _))
                 {
-                    _logger.LogDebug("TaskCompletionSource for jobId {JobId} removed due to client cancellation.", jobId);
+                    _logger.LogDebug("TaskCompletionSource for jobId {JobId} removed due to client cancellation.",
+                        jobId);
                 }
+
                 // Оновлюємо стан в Redis на "cancelled"
                 await _redisDb.HashSetAsync(jobKey, new HashEntry[]
                 {
                     new HashEntry("state", JobStatus.Cancelled.ToString()), //  Використання Enum для статусу
                     new HashEntry("errorMessage", "Job cancelled by client.")
                 });
-                JobsFailedTotal.WithLabels("client_cancelled").Inc(); //  Статус "cancelled" ми теж вважаємо помилкою з точки зору успішності
+                JobsFailedTotal.WithLabels("client_cancelled")
+                    .Inc(); //  Статус "cancelled" ми теж вважаємо помилкою з точки зору успішності
                 JobsConcurrentWaiting.Dec(); // Зменшуємо Gauge
                 await pubSub.UnsubscribeAsync(RedisChannel.Literal(channelName));
-                _logger.LogInformation("Unsubscribed from Redis channel {ChannelName} for jobId {JobId} due to cancellation.", channelName, jobId);
+                _logger.LogInformation(
+                    "Unsubscribed from Redis channel {ChannelName} for jobId {JobId} due to cancellation.", channelName,
+                    jobId);
                 throw;
             }
             catch (TimeoutException)
@@ -251,6 +278,7 @@ namespace AsyncJobProcessor.Services
                 {
                     _logger.LogDebug("TaskCompletionSource for jobId {JobId} removed due to timeout.", jobId);
                 }
+
                 await _redisDb.HashSetAsync(jobKey, new HashEntry[]
                 {
                     new HashEntry("state", nameof(JobStatus.Timeout)), // Використання Enum для статусу
@@ -259,7 +287,9 @@ namespace AsyncJobProcessor.Services
                 JobsFailedTotal.WithLabels("timeout").Inc(); // Збільшуємо лічильник таймаутів
                 JobsConcurrentWaiting.Dec(); // Зменшуємо Gauge
                 await pubSub.UnsubscribeAsync(RedisChannel.Literal(channelName));
-                _logger.LogInformation("Unsubscribed from Redis channel {ChannelName} for jobId {JobId} due to timeout.", channelName, jobId);
+                _logger.LogInformation(
+                    "Unsubscribed from Redis channel {ChannelName} for jobId {JobId} due to timeout.", channelName,
+                    jobId);
                 throw;
             }
             finally
@@ -290,45 +320,81 @@ namespace AsyncJobProcessor.Services
         /// </summary>
         /// <param name="jobId">Ідентифікатор завдання.</param>
         /// <param name="result">Об'єкт з результатом завдання.</param>
-        public async Task<bool>ProcessJobCallbackAsync(string jobId, JobResult result)
+        public async Task<bool> ProcessJobCallbackAsync(string jobId, JobResult result)
         {
             _logger.LogInformation("Processing callback for jobId: {JobId}, status: {Status}", jobId, result.Status);
-            
+
             var jobKey = $"job:{jobId}";
 
-            // [нове] Перевірка існування ключа в Redis
+            // [1] Перевірка існування ключа
             if (!await _redisDb.KeyExistsAsync(jobKey))
             {
                 _logger.LogWarning("Callback received for non-existent or already expired job: {JobId}", jobId);
-                return false; // [нове] Повертаємо false, якщо ключ не знайдено
-            }
-            result.JobId = jobId;
-
-            // 1. Оновлюємо стан завдання в Redis
-            var hashEntries = new HashEntry[]
-            {
-                new HashEntry("state", result.Status.ToString()), // Використання Enum для статусу
-                new HashEntry("message", result.Message),
-                new HashEntry("completedAt", DateTimeOffset.UtcNow.ToUnixTimeSeconds())
-            };
-            await _redisDb.HashSetAsync(jobKey, hashEntries);
-            _logger.LogInformation("Job {JobId} state updated to '{Status}' in Redis.", jobId, result.Status);
-
-            if (result.Payload != null)
-            {
-                await _redisDb.HashSetAsync(jobKey, "payload", JsonSerializer.Serialize(result.Payload));
-            }
-            if (!string.IsNullOrEmpty(result.ErrorMessage))
-            {
-                await _redisDb.HashSetAsync(jobKey, "errorMessage", result.ErrorMessage);
+                return false;
             }
 
-            // Публікуємо результат у Redis Pub/Sub, щоб розблокувати очікування
-            var pubSub = _redisMux.GetSubscriber();
-            var channelName = $"jobs:results:{jobId}";
-            await pubSub.PublishAsync(RedisChannel.Literal(channelName), JsonSerializer.Serialize(result));
-            _logger.LogInformation("Published result for jobId {JobId} to channel {ChannelName}.", jobId, channelName);
+            // [2] Читаємо існуюче завдання як рядок (JSON)
+            var jobJson = await _redisDb.StringGetAsync(jobKey);
+            if (jobJson.IsNullOrEmpty)
+            {
+                _logger.LogWarning("Job {JobId} found in Redis but content is empty.", jobId);
+                return false;
+            }
+
+            JobData? jobData;
+            try
+            {
+                jobData = JsonSerializer.Deserialize<JobData>(jobJson);
+                if (jobData == null)
+                {
+                    _logger.LogError("Failed to deserialize JobData for JobId: {JobId} from Redis. Content: {JobJson}",
+                        jobId, jobJson);
+                    return false;
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "JSON deserialization error for JobId: {JobId}. Content: {JobJson}", jobId,
+                    jobJson);
+                return false;
+            }
+
+            // [3] Оновлюємо статус та інші поля
+            jobData.Status = result.Status;
+            jobData.CompletedAt = DateTimeOffset.UtcNow; // Оновлюємо час завершення
+            jobData.ResultPayload = JsonSerializer.Serialize(result.Payload); // Зберігаємо payload як JSON-рядок
+            jobData.ErrorMessage = result.ErrorMessage; // Зберігаємо повідомлення про помилку, якщо є
+
+            _logger.LogInformation("Job {JobId} updated with status: {Status}.", jobId, jobData.Status);
+
+            // [4] Серіалізуємо оновлений об'єкт назад у JSON
+            var updatedJobJson = JsonSerializer.Serialize(jobData);
+
+            // [5] Зберігаємо оновлений рядок назад у Redis (як STRING)
+            await _redisDb.StringSetAsync(jobKey, updatedJobJson, TimeSpan.FromMinutes(30));
+
+            _logger.LogInformation("Job {JobId} callback processed successfully. Job status updated in Redis.", jobId);
+
+            JobsConcurrentWaiting.Dec(); // Зменшуємо Gauge, оскільки завдання завершено
+            
+            if (jobData.Status == JobStatus.Completed)
+            {
+                _logger.LogInformation("Job {JobId} completed successfully.", jobId);
+            }
+            else if (jobData.Status == JobStatus.Failed)
+            {
+                _logger.LogError("Job {JobId} failed: {ErrorMessage}", jobId, jobData.ErrorMessage);
+            }
+
             return true;
+        }
+
+        public async Task SaveJobAsync(JobData job) // Ваша внутрішня модель завдання
+        {
+            var jobKey = $"job:{job.JobId}"; // Формування ключа Redis
+            var serializedJob = JsonSerializer.Serialize(job);
+            await _redisDb.StringSetAsync(jobKey, serializedJob, TimeSpan.FromMinutes(30)); // Зберігаємо з TTL
+            _logger.LogInformation("Job {JobId} saved to Redis.", job.JobId);
         }
     }
 }

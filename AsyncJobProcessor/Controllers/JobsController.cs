@@ -1,8 +1,7 @@
-using AsyncJobProcessor.Interfaces; // Додаємо using для інтерфейсу
+using AsyncJobProcessor.Interfaces;
 using AsyncJobProcessor.Models;
 using Microsoft.AspNetCore.Mvc;
 using StackExchange.Redis;
-using Microsoft.Extensions.Logging;
 
 namespace AsyncJobProcessor.Controllers
 {
@@ -100,8 +99,6 @@ namespace AsyncJobProcessor.Controllers
             try
             {
                 // [2] Делегування обробки JobService
-                // Метод JobService блокуватиметься, доки не отримає результат через Redis Pub/Sub,
-                // або доки не відбудеться таймаут/скасування.
                 var result = await _jobService.RegisterAndProcessJobAsync(request, cancellationToken);
                 _logger.LogInformation("Job completed successfully and result returned for request data: {RequestData}", request.Data);
                 return Ok(result); // [3] Повертаємо успішний результат
@@ -109,16 +106,13 @@ namespace AsyncJobProcessor.Controllers
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 // [4] Обробка скасування клієнтом (наприклад, клієнт закрив браузер)
-                // `cancellationToken.IsCancellationRequested` перевіряє, чи було скасування ініційовано ззовні.
                 _logger.LogWarning("Client cancelled the job processing for request data: {RequestData}", request.Data);
-                // Використовуємо 499 - неофіційний HTTP-статус, але часто використовується для Client Closed Request.
                 return StatusCode(499, "Client Closed Request (Operation was cancelled)."); 
             }
             catch (TimeoutException)
             {
                 // [5] Обробка таймауту, якщо JobService не зміг отримати результат за відведений час.
                 _logger.LogError("Job processing timed out for request data: {RequestData}", request.Data);
-                // 504 Gateway Timeout - підходить, якщо сервіс не отримав відповідь від іншого сервісу.
                 return StatusCode(504, "Gateway Timeout (Job processing exceeded allowed time).");
             }
             catch (Exception ex)

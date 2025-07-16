@@ -2,6 +2,7 @@ using Serilog;
 using StackExchange.Redis;
 using AsyncJobProcessor.Interfaces;
 using AsyncJobProcessor.Middleware;
+using AsyncJobProcessor.Models;
 using AsyncJobProcessor.Services; // Для HttpStatusCodes
 using Polly; // Для базових типів Polly
 using Polly.Extensions.Http; // Для ResilienceContext.Key<HttpRequestMessage>
@@ -37,8 +38,8 @@ try
     builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
     {
         var connectionString =
-            sp.GetRequiredService<IConfiguration>().GetConnectionString("RedisConnection") // Змінено тут
-            ?? "localhost:6379,abortConnect=false"; // Додано fallback значення
+            sp.GetRequiredService<IConfiguration>().GetConnectionString("RedisConnection") 
+            ?? "localhost:6379,abortConnect=false";
         return ConnectionMultiplexer.Connect(connectionString);
     });
     builder.Services.AddSingleton<IDatabase>(provider =>
@@ -116,11 +117,38 @@ try
         {
             var testClientService = scope.ServiceProvider.GetRequiredService<TestClientService>();
             var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            var jobService = scope.ServiceProvider.GetRequiredService<IJobService>(); // Переконайтеся, що JobService зареєстрований і доступний
+
             var callbackHost = configuration["CallbackHost"] ?? "https://localhost:7213";
 
-            // Це URL вашого AsyncJobProcessor, куди MockService надішле колбек
-            _ = testClientService.RunTestJobAsync("Test Data 1 (via client service)", $"{callbackHost}/api/callbacks/jobs/{Guid.NewGuid()}");
-            _ = testClientService.RunTestJobAsync("Test Data 2 (via client service)", $"{callbackHost}/api/callbacks/jobs/{Guid.NewGuid()}");
+            // --- Зміни починаються тут ---
+
+            // *** 1. Створюємо JobId ОДИН раз і використовуємо його для всіх подальших кроків ***
+            var job1Id = Guid.NewGuid().ToString();
+            var job2Id = Guid.NewGuid().ToString();
+            var job3Id = Guid.NewGuid().ToString();
+
+            // *** 2. Зберігаємо завдання в Redis вручну для тестового сценарію ***
+            // Це імітує те, що JobsController робив би при отриманні реального JobRequest.
+            // Ми повинні "повідомити" AsyncJobProcessor, що ці завдання існують і перебувають у статусі Pending.
+
+            // Модель JobData - це ваша внутрішня модель для зберігання в Redis
+            // Припускаємо, що у вас є такий клас у AsyncJobProcessor.Models
+            // Якщо ні, створіть його. Він має містити як мінімум JobId та Status.
+            // public class JobData { public string JobId { get; set; } public JobStatus Status { get; set; } public string RequestData { get; set; } }
+
+            await jobService.SaveJobAsync(new JobData { JobId = job1Id, Status = JobStatus.Pending, RequestData = "Test Data 1 (client service)" });
+            await jobService.SaveJobAsync(new JobData { JobId = job2Id, Status = JobStatus.Pending, RequestData = "Test Data 2 (client service)" });
+            await jobService.SaveJobAsync(new JobData { JobId = job3Id, Status = JobStatus.Pending, RequestData = "Test Data 3 (client service)" });
+
+
+            // *** 3. Викликаємо TestClientService для відправки запитів до MockThirdPartyService ***
+            // CallbackUrl містить той самий JobId, який ми щойно зберегли в Redis.
+            _ = testClientService.RunTestJobAsync("Test Data 1 (client service)", $"{callbackHost}/api/callbacks/jobs/{job1Id}");
+            _ = testClientService.RunTestJobAsync("Test Data 2 (client service)", $"{callbackHost}/api/callbacks/jobs/{job2Id}");
+            _ = testClientService.RunTestJobAsync("Test Data 3 (client service)", $"{callbackHost}/api/callbacks/jobs/{job3Id}");
+
+            // --- Зміни закінчуються тут ---
         }
     }
 

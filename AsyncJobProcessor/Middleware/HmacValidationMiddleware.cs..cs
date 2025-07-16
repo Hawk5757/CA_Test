@@ -1,5 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Http; // Додайте цей using, якщо його немає
+using Microsoft.Extensions.Configuration; // Додайте цей using, якщо його немає
+using Microsoft.Extensions.Logging; // Додайте цей using, якщо його немає
+
 
 namespace AsyncJobProcessor.Middleware
 {
@@ -14,7 +18,7 @@ namespace AsyncJobProcessor.Middleware
             _next = next;
             _logger = logger;
 
-            var secretKey = configuration["Security:CallbackSecretKey"] 
+            var secretKey = configuration["Security:CallbackSecretKey"]
                             ?? throw new InvalidOperationException("CallbackSecretKey is not configured.");
             _callbackSecretKeyBytes = Encoding.UTF8.GetBytes(secretKey);
         }
@@ -36,22 +40,23 @@ namespace AsyncJobProcessor.Middleware
             // Це потрібно, щоб ми могли зчитати сирі байти для HMAC,
             // а потім контролер міг знову прочитати їх для десеріалізації.
             context.Request.EnableBuffering();
-            
+
             // [3] Читаємо сирі байти тіла запиту
+            // Важливо: bodyStream не закривається, бо його позицію ми скидаємо.
             using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, true, 1024, true);
             var rawBody = await reader.ReadToEndAsync();
-            
+
             // [4] Скидаємо позицію потоку на початок, щоб контролер міг десеріалізувати тіло
             context.Request.Body.Position = 0;
 
             // [5] Очікуваний HMAC-підпис з HTTP-заголовка
-            var expectedHmacHeader = context.Request.Headers["X-Simulated-Hmac-Signature"].FirstOrDefault();
+            var expectedHmacHeader = context.Request.Headers["X-HMAC-SHA256"].FirstOrDefault();
 
             if (string.IsNullOrEmpty(expectedHmacHeader))
             {
-                _logger.LogWarning("Callback for {Path} received without X-Simulated-Hmac-Signature header.", context.Request.Path);
+                _logger.LogWarning("Callback for {Path} received without X-HMAC-SHA256 header. Missing or empty.", context.Request.Path);
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await context.Response.WriteAsync("Missing HMAC signature.");
+                await context.Response.WriteAsync("Missing HMAC signature header.");
                 return;
             }
 
@@ -61,7 +66,7 @@ namespace AsyncJobProcessor.Middleware
             // [7] Порівнюємо отриманий HMAC з нашим обчисленим
             if (!calculatedHmac.Equals(expectedHmacHeader, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogWarning("Invalid HMAC signature for {Path}. Expected: {Expected}, Calculated: {Calculated}", 
+                _logger.LogWarning("Invalid HMAC signature for {Path}. Expected: {Expected}, Calculated: {Calculated}",
                                    context.Request.Path, expectedHmacHeader, calculatedHmac);
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await context.Response.WriteAsync("Invalid HMAC signature.");
